@@ -1,0 +1,90 @@
+---
+title: "STATS 506 Problem Set 4"
+author: "Lindsey Lin"
+format: pdf
+editor: visual
+---
+
+#### GitHub Repository Link: <https://github.com/ziyelinlin/STATS-506-Problem-Set-4.git>
+
+```{r}
+library(nzelect)
+library(tidyverse)
+library(knitr)
+library(scales)
+```
+
+## Problem 1 - Tidyverse: New Zealand
+
+Use the **tidyverse** for this problem. In particular, use piping and **dplyr** as much as you are able. **Note**: Use of any deprecated functions will result in a point loss.
+
+Install and load the package [**nzelect**](https://cran.r-project.org/package=nzelect). This package contains a number of data tables with information about election results in New Zealand. Use the `nzge` data for this problem.
+
+Note that there are two types of votes cast - a **Candidate vote**, and a **Party vote**. Be sure to handle these separately as appropriate. Don’t forget that `help()` works on data as well a functions (assuming the data is appropriately documented).
+
+```{r}
+data(nzge)
+```
+
+a\. Generate a table (which can just be a nicely printed tibble) of **vote count** (regardless of party) **per year/type**. Make sure to **sort it by vote count**.
+
+```{r}
+vote_count <- nzge %>% 
+  group_by(election_year, voting_type) %>% 
+  summarize(vote_count = sum(votes, na.rm = TRUE), .groups = "drop") %>% 
+  arrange(desc(vote_count))
+
+vote_count %>% 
+  kable(caption = "Vote Counts by Year and Voting Type",
+        col.names = c("Year", "Vote Type", "Vote Count"))
+```
+
+b\. Focus only on the **2014 election**. Report the **proportion** of votes for **each party in the Candidate election**. Again, produce a nice table and **sort it by percent of vote**.
+
+```{r}
+vote_percent_2014 <- nzge %>% 
+  filter(election_year == 2014, voting_type == "Candidate") %>% 
+  group_by(party) %>% 
+  summarize(votes = sum(votes, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(prop = votes / sum(votes),
+         pct = percent(prop, accuracy = 0.001)) %>% 
+  arrange(desc(prop)) %>% 
+  select(c(party, pct))
+
+vote_percent_2014 %>% 
+  kable(caption = "Vote Share by Party of 2014 Candidate Election",
+        col.names = c("Party", "Vote Share"),
+        align   = c("l","r"))
+```
+
+c\. Produce a nice table indicating, for **each year**, which party **won the Candidate** vote and which party **won the Party vote**.
+
+```{r}
+winners <- nzge %>% 
+  group_by(election_year, voting_type, party) %>% 
+  summarize(votes = sum(votes, na.rm = TRUE), .groups = "drop_last") %>% 
+  group_by(election_year, voting_type) %>% 
+  slice_max(votes, n = 1) %>% 
+  ungroup() %>% 
+  mutate(label = party) %>% 
+  select(election_year, voting_type, label) %>% 
+  pivot_wider(names_from = voting_type, values_from = label) %>% 
+  arrange(desc(election_year)) 
+
+winners %>% 
+  kable(caption = "Winners of Votes by Year",
+        col.names = c("Year", "Candidate Vote", "Party Vote"))
+```
+
+## Problem 2 - Tidyverse: Tennis
+
+```{r}
+
+```
+
+## Problem 3 - Visualization
+
+```{r}
+
+```
