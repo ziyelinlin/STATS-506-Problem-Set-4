@@ -14,8 +14,6 @@ library(knitr)
 library(scales)
 library(infer)
 library(lubridate)
-library(slider)
-library(maps)
 ```
 
 ## Problem 1 - Tidyverse: New Zealand
@@ -106,9 +104,13 @@ I found each Davis Cup tie (e.g., "Davis Cup Finals RR: FRA vs JPN") is encoded 
 
 Therefore, I defined a tournament as a distinct `tourney_id`, **except** that all Davis Cup ties in 2019 are collapsed and counted as **one** “Davis Cup 2019” tournament.
 
+Though some matches took place in 2018, I assumed that they were part of a tournament ending in 2019.
+
 ```{r}
 tennis_collapsed <- tennis %>%
-  mutate(tourney_key = if_else(tourney_level == "D", "2019-M-DC-2019", tourney_id)) 
+  mutate(tourney_key = if_else(tourney_level == "D", 
+                               "2019-M-DC-2019", 
+                               tourney_id)) 
 
 tennis_collapsed %>% 
   distinct(tourney_key) %>% 
@@ -136,8 +138,6 @@ c("2019-9210", "2019-M-DC-2019") %in% event_with_final
 
 Notes:
 
-Though some matches took place in 2018, I assumed that they were part of a tournament ending in 2019.
-
 Before counting “tournament winners,” I verified which events in this dataset have a single decisive final (`round == "F"`). Laver Cup is a team exhibition with many individual matches and no `round == "F"` row. Davis Cup is also a team event. The “Final” is a tie between two nations made up of multiple rubbers, so there isn’t a single player final (e.g., I found two rows for Davis Cup Finals F: CAN vs ESP).
 
 Therefore, for part (b) I **excluded** Davis Cup and Laver Cup and defined a tournament winner as the winner of the Final in the remaining 67 events.
@@ -157,7 +157,7 @@ tennis_collapsed %>%
 
 Answer:
 
-Yes, 12 players won more than one tournament; the most winningplayers (Novak Djokovic and Dominic Thiem) won was 5 tournaments.
+Yes, 12 players won more than one tournament; the most winning players (Novak Djokovic and Dominic Thiem) won was 5 tournaments.
 
 c\. Is there any evidence that **winners have more aces than losers**? (If you address this with a hypothesis test, do not use base R functionality - continue to remain in the Tidyverse.)
 
@@ -362,7 +362,7 @@ c\. Identify, to the best of your ability **without a formal test**, the first f
 
 Notes:
 
-I defined “substantial” as the first date a state reached ≥ 2 deaths per 100k using `deaths_avg_per_100k`, focusing on 50 U.S. states only. For each state I computed the earliest date meeting the threshold, then sorted by that date and took the first five states. In the plots, a national median reference line (median over states each day) is included for visual comparison.
+I defined “substantial” as the first date a state reached at least 2 deaths per 100k using `deaths_avg_per_100k`, focusing on 50 U.S. states only. For each state I computed the earliest date meeting the threshold, then sorted by that date and took the first five states. In the plots, a national median reference line (median over states each day) is included for visual comparison.
 
 ```{r}
 earliest5 <- covid %>% 
@@ -413,7 +413,7 @@ covid %>%
   scale_y_continuous("7-day deaths per 100k", 
                      labels = label_number(accuracy = 0.1)) +
   labs(title = "Earliest States to Experience Substantial Covid Mortality",
-       subtitle = "dashed line marks first date with ≥ 2 deaths per 100k, grey line is the national median",
+       subtitle = "dashed line marks first date with at least 2 deaths per 100k, grey line is the national median",
        x = NULL) +
   theme_minimal() +
   theme(plot.title = element_text(size = 14, face = "bold"),
@@ -424,3 +424,16 @@ covid %>%
 Answer:
 
 The dashed line in each panel marks the first day the state’s 7-day death rate reached ≥ 2 per 100k. Based on the plot, the first five states to experience Covid substantially were New York (Apr 03, 2020), New Jersey (Apr 10, 2020), Connecticut (Apr 15, 2020), Massachusetts (Apr 20, 2020), and North Dakota (Nov 08, 2020). Interestingly, the top four are tightly clustered in the Northeast during the initial spring 2020 wave.
+
+## 
+Disclosure
+
+ChatGPT helped i. refine ggplots formatting (e.g., adding subtitles, bold titles, annotations); ii. clarify tennis event structure (Davis Cup/Laver Cup), explain that Davis Cup ties are team events without a single ‘F’ round, and that Laver Cup is an exhibition. These clarifications informed my inclusion/exclusion rules. Analytic design, filtering logic, hypothesis tests, and answers are my own.
+
+				
+
+			
+
+		
+
+	
