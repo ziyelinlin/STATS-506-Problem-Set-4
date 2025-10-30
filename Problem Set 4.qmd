@@ -12,6 +12,10 @@ library(nzelect)
 library(tidyverse)
 library(knitr)
 library(scales)
+library(infer)
+library(lubridate)
+library(slider)
+library(maps)
 ```
 
 ## Problem 1 - Tidyverse: New Zealand
@@ -79,12 +83,344 @@ winners %>%
 
 ## Problem 2 - Tidyverse: Tennis
 
-```{r}
+Use the **tidyverse** for this problem. In particular, use piping and **dplyr** as much as you are able. **Note**: Use of any deprecated functions will result in a point loss.
 
+Use the [ATP Matches](https://raw.githubusercontent.com/JeffSackmann/tennis_atp/refs/heads/master/atp_matches_2019.csv) data from 2019. This data tracks all Tennis matches. This data **does not have documentation**, so you’ll have to explore the data yourself to figure out it’s structure. Use it to answer the following questions. Your answers should show both the output from R that allows you to answer it, as well as a written answer.
+
+```{r}
+tennis <- read.csv("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/refs/heads/master/atp_matches_2019.csv")
 ```
+
+a\. How many **tournaments** took place in **2019**?
+
+```{r}
+tennis %>% 
+  filter(tourney_level == "D") %>%
+  distinct(tourney_id) %>% 
+  nrow()
+```
+
+Notes:
+
+I found each Davis Cup tie (e.g., "Davis Cup Finals RR: FRA vs JPN") is encoded with its own `tourney_id`. This would over-count Davis Cup relative to other events.
+
+Therefore, I defined a tournament as a distinct `tourney_id`, **except** that all Davis Cup ties in 2019 are collapsed and counted as **one** “Davis Cup 2019” tournament.
+
+```{r}
+tennis_collapsed <- tennis %>%
+  mutate(tourney_key = if_else(tourney_level == "D", "2019-M-DC-2019", tourney_id)) 
+
+tennis_collapsed %>% 
+  distinct(tourney_key) %>% 
+  nrow()
+```
+
+Answer:
+
+In total, 69 tournaments took place in 2019.
+
+b\. Did any player **win more than one** tournament? If so, **how many** players won more than one tournament, and how many tournaments did the **most winning player(s) win**?
+
+```{r}
+event_with_final <- tennis_collapsed %>%
+  filter(round == "F") %>%
+  distinct(tourney_key) %>%
+  pull(tourney_key)
+
+length(event_with_final)  
+```
+
+```{r}
+c("2019-9210", "2019-M-DC-2019") %in% event_with_final
+```
+
+Notes:
+
+Though some matches took place in 2018, I assumed that they were part of a tournament ending in 2019.
+
+Before counting “tournament winners,” I verified which events in this dataset have a single decisive final (`round == "F"`). Laver Cup is a team exhibition with many individual matches and no `round == "F"` row. Davis Cup is also a team event. The “Final” is a tie between two nations made up of multiple rubbers, so there isn’t a single player final (e.g., I found two rows for Davis Cup Finals F: CAN vs ESP).
+
+Therefore, for part (b) I **excluded** Davis Cup and Laver Cup and defined a tournament winner as the winner of the Final in the remaining 67 events.
+
+```{r}
+tennis_collapsed %>%
+  filter(tourney_level != "D", tourney_name != "Laver Cup", round == "F") %>% 
+  select(tourney_id, tourney_name, winner_id, winner_name) %>% 
+  group_by(winner_id, winner_name) %>% 
+  summarize(n_tourney = n_distinct(tourney_id), .groups = "drop") %>%
+  filter(n_tourney > 1) %>% 
+  arrange(desc(n_tourney)) %>% 
+  select(-winner_id) %>% 
+  kable(caption = "Players With Multiple Tournament Titles in 2019", 
+        col.names = c("Player", "Tournament Titles"))
+```
+
+Answer:
+
+Yes, 12 players won more than one tournament; the most winningplayers (Novak Djokovic and Dominic Thiem) won was 5 tournaments.
+
+c\. Is there any evidence that **winners have more aces than losers**? (If you address this with a hypothesis test, do not use base R functionality - continue to remain in the Tidyverse.)
+
+```{r}
+tennis_collapsed %>%
+  select(w_ace, l_ace, w_svpt, l_svpt) %>% 
+  filter(!is.na(w_ace), !is.na(l_ace), !is.na(w_svpt), !is.na(l_svpt)) %>%
+  mutate(d_rate = (w_ace/w_svpt) - (l_ace/l_svpt)) %>% 
+  t_test(., response = d_rate, alternative = "greater", mu = 0) %>% 
+  kable(caption = "One-sided t-test Results")
+```
+
+Answer:
+
+I defined the within–match ace–rate difference as
+
+$$
+d_i=\frac{w_{\text{ace},\,i}}{w_{\text{svpt},\,i}}-\frac{l_{\text{ace},\,i}}{l_{\text{svpt},\,i}}
+$$
+
+where $w_{\text{ace},i}$ and $l_{\text{ace},i}$ are the numbers of aces by the winner and loser in each match, and $w_{\text{svpt},i}$ and $l_{\text{svpt},i}$ are their serve-point totals. I computed $d_i$ only for matches with no missing values.
+
+I ran a right-tailed paired t-test with hypotheses
+
+$$
+H_0:\ \mathbb{E}[d_i]=0 \quad\text{vs}\quad H_a:\ \mathbb{E}[d_i]>0
+$$
+
+Based on the output, the very small p-value provides strong evidence that winners have a higher ace rate than losers. The point estimate is 0.0294, meaning winners average about 2.94 more aces per 100 serve points than losers.
+
+d\. Identify the player(s) with the **highest win-rate**. (Note that this is NOT asking for the highest number of wins.) Restrict to players with **at least 5 matches**.
+
+```{r}
+players_long <- bind_rows(
+  tennis %>% transmute(player_id = winner_id, 
+                       player_name = winner_name, 
+                       result = "W"),
+  tennis %>% transmute(player_id = loser_id, 
+                       player_name = loser_name, 
+                       result = "L")
+  )
+
+head(players_long)
+```
+
+```{r}
+players_long %>%
+  group_by(player_id, player_name) %>% 
+  summarize(n_matches = n(),
+            n_wins = sum(result == "W"),
+            win_rate = n_wins / n_matches,
+            .groups = "drop") %>% 
+  filter(n_matches >= 5) %>% 
+  arrange(desc(win_rate)) %>% 
+  mutate(win_rate = percent(win_rate, accuracy = 0.01)) %>% 
+  select(-player_id) %>% 
+  slice_head(n = 10) %>% 
+  kable(caption = "Top 10 ATP Players by Win Rate in 2019 (min. 5 matches)",
+        col.names = c("Player", "Matches", "Wins", "Win Rate"))
+```
+
+Answer:
+
+Rafael Nadal had the highest win-rate of 86.96% in 2019.
 
 ## Problem 3 - Visualization
 
-```{r}
+Note: This is, intentionally, a very open-ended question. There is no “right” answer. The goal is for you to explore your plotting options, and settle on something reasonable. You can use base R, ggplot, or something else. You’ll likely have to look online for resources on plotting beyond what we covered in class.
 
+Use the [NYTimes Covid](https://raw.githubusercontent.com/nytimes/covid-19-data/refs/heads/master/rolling-averages/us-states.csv) data. This lists daily Covid new cases. For each of the following, produce a publication-ready plot which addresses the question. Use your plot to support an argument for your question.
+
+```{r}
+covid <- read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/refs/heads/master/rolling-averages/us-states.csv")
+
+covid$date <- ymd(covid$date)
 ```
+
+a\. How many major and minor **spikes** in cases were there?
+
+Notes:
+
+Based on the data [documentation](https://github.com/nytimes/covid-19-data/blob/master/rolling-averages/README.md#rolling-averages), I decided to work directly with `cases_avg_per_100k`, which is the average number of new cases reported over the most recent seven days of data per 100,000 people.
+
+Since states began reporting on different dates (e.g., Alabama started on 2020-03-13), I constructed a national series by taking, for each calendar day, the median across states reporting on that day. To avoid early periods with sparse coverage, I started the national state curve when all 50 states (excluding D.C. and five major territories) were reporting.
+
+```{r}
+state_series <- covid %>% 
+  filter(!(state %in% c("American Samoa", 
+                        "Guam", 
+                        "Northern Mariana Islands", 
+                        "Puerto Rico", 
+                        "Virgin Islands",
+                        "District of Columbia"))) %>% 
+  group_by(date) %>% 
+  summarize(n_state_reported = n_distinct(state),
+            median_cases_avg_per_100k = median(cases_avg_per_100k, na.rm = TRUE),
+            .groups = "drop") %>% 
+  filter(n_state_reported >= 50) %>% 
+  arrange(date)
+```
+
+```{r}
+ggplot(state_series, aes(date, median_cases_avg_per_100k)) +
+  geom_line(linewidth = 0.3) +
+  scale_y_continuous("Median state 7-day cases per 100k", 
+                     labels = number_format(accuracy = 0.1)) +
+  labs(title = "U.S. COVID-19: Median State 7-Day Covid-19 Cases per 100k (2020–2023)",
+       subtitle = "excluding D.C. and five major territories",
+       x = NULL) + 
+  theme_minimal() + 
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        plot.subtitle = element_text(size = 10, color = "darkgrey"),
+        axis.title.y = element_text(size = 10, margin = margin(r = 10)))
+```
+
+Answer:
+
+Based on the plot, there were 1 major spike that occurred in Jan 2022 (the Omicron variant). There were 3 minor spikes, the first occurred in late 2020 and early 2021, the second occurred in the late summer/early fall of 2021 (the Delta variant), the third in mid-2022.
+
+b\. For the states with the **highest** and **lowest** **overall rates per population**, what differences do you see in their trajectories over time?
+
+Notes:
+
+Same as previous part, states began reporting on different dates, so I restricted the time axis to dates when all 50 states were reporting and excluded D.C. and five major territories. For each state I computed a the **mean** of `cases_avg_per_100k` over the study window to identity the states with the highest and lowest overall rates per population. When plotting, I overlaid the national median (across states, same exclusions) as a reference line in each panel.
+
+```{r}
+valid_starting_date <- covid %>% 
+  filter(!(state %in% c("American Samoa", 
+                        "Guam", 
+                        "Northern Mariana Islands", 
+                        "Puerto Rico", 
+                        "Virgin Islands",
+                        "District of Columbia"))) %>% 
+  group_by(date) %>% 
+  summarize(n_state_reported = n_distinct(state),
+            .groups = "drop") %>% 
+  filter(n_state_reported >= 50) %>% 
+  arrange(date) %>% 
+  slice(1) %>% 
+  pull(date)
+```
+
+```{r}
+state_overall <- covid %>% 
+  filter(!(state %in% c("American Samoa", 
+                        "Guam", 
+                        "Northern Mariana Islands", 
+                        "Puerto Rico", 
+                        "Virgin Islands",
+                        "District of Columbia")),
+         date >= valid_starting_date) %>% 
+  group_by(state) %>% 
+  summarize(overall_per_100k = mean(cases_avg_per_100k, na.rm = TRUE),
+            .groups = "drop") %>% 
+  arrange(desc(overall_per_100k))
+
+high_state <- state_overall %>% slice(1) %>% pull(state)
+low_state <- state_overall %>% slice(n()) %>% pull(state)
+
+traj <- covid %>% 
+  filter(state %in% c(high_state, low_state),
+         date >= valid_starting_date)
+
+nation_median <- covid %>% 
+  filter(!(state %in% c("American Samoa", 
+                        "Guam", 
+                        "Northern Mariana Islands", 
+                        "Puerto Rico", 
+                        "Virgin Islands",
+                        "District of Columbia")),
+         date >= valid_starting_date) %>% 
+  group_by(date) %>% 
+  summarize(us_median = median(cases_avg_per_100k, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+ggplot(traj, aes(date, cases_avg_per_100k)) +
+  geom_line(data = nation_median, 
+            aes(y = us_median), 
+            color = "grey", 
+            linewidth = 0.3) +
+  geom_line(color = "black", linewidth = 0.5) + 
+  facet_wrap(vars(state), ncol = 1) +
+  scale_y_continuous("7-day cases per 100k", 
+                     labels = number_format(accuracy = 1)) +
+  labs(title = "Covid-19 Trajectories for Highest vs Lowest Overall Rates per 100k",
+       subtitle = "grey line indicate national median excluding D.C. and major territories",
+       x = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        plot.subtitle = element_text(size = 10, color = "darkgrey"),
+        axis.title.y = element_text(size = 10, margin = margin(r = 10)))
+```
+
+Answer:
+
+Using the stated rules, the state with the highest overall rate is Rhode Island and the lowest is Maine.
+
+Maine’s peaks are consistently lower and remain closer to the national reference most of the time. Rhode Island’s curve shows much higher peaks, especially a very sharp Omicron spike in January 2022, well above the national median. Overall, Maine experiences broader, slower rises and declines while Rhode Island exhibits narrow, steep spikes.
+
+c\. Identify, to the best of your ability **without a formal test**, the first five states to experience Covid in a **substantial way**.
+
+Notes:
+
+I defined “substantial” as the first date a state reached ≥ 2 deaths per 100k using `deaths_avg_per_100k`, focusing on 50 U.S. states only. For each state I computed the earliest date meeting the threshold, then sorted by that date and took the first five states. In the plots, a national median reference line (median over states each day) is included for visual comparison.
+
+```{r}
+earliest5 <- covid %>% 
+  filter(!(state %in% c("American Samoa", 
+                        "Guam", 
+                        "Northern Mariana Islands", 
+                        "Puerto Rico", 
+                        "Virgin Islands",
+                        "District of Columbia"))) %>% 
+  filter(deaths_avg_per_100k >= 2) %>% 
+  group_by(state) %>% 
+  summarize(first_date = min(date), .groups = "drop") %>% 
+  arrange(first_date) %>% 
+  slice(1:5)
+
+earliest_5_states <- earliest5 %>% pull(state)
+
+plot_df <- covid %>% filter(state %in% earliest_5_states)
+
+nation_ref <- covid %>%
+  filter(!(state %in% c("American Samoa","Guam","Northern Mariana Islands",
+                        "Puerto Rico","Virgin Islands","District of Columbia"))) %>%
+  group_by(date) %>%
+  summarise(us_median = median(deaths_avg_per_100k, na.rm = TRUE), .groups = "drop")
+```
+
+```{r fig.width=9, fig.height=12, fig.retina=2}
+covid %>% 
+  filter(state %in% earliest_5_states) %>% 
+  ggplot(., aes(x = date, y = deaths_avg_per_100k)) +
+  geom_line(color = "black", linewidth = 0.5) +
+  geom_line(data = nation_ref, 
+            aes(y = us_median), 
+            color = "grey") +
+  geom_vline(data = earliest5,
+             aes(xintercept = first_date), 
+             linetype = "dashed",
+             linewidth = 0.2,
+             color = "brown") + 
+  geom_text(data = earliest5,
+            aes(x = first_date, 
+                y = Inf,
+                label = paste0(format(first_date, "%b %d, %Y"))),
+            color = "brown", 
+            size = 3) +
+  facet_wrap(~ state, ncol = 1) +
+  coord_cartesian(clip = "off") +
+  scale_y_continuous("7-day deaths per 100k", 
+                     labels = label_number(accuracy = 0.1)) +
+  labs(title = "Earliest States to Experience Substantial Covid Mortality",
+       subtitle = "dashed line marks first date with ≥ 2 deaths per 100k, grey line is the national median",
+       x = NULL) +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 10, color = "darkgrey"),
+        axis.title.y = element_text(size = 10, margin = margin(r = 10)))
+```
+
+Answer:
+
+The dashed line in each panel marks the first day the state’s 7-day death rate reached ≥ 2 per 100k. Based on the plot, the first five states to experience Covid substantially were New York (Apr 03, 2020), New Jersey (Apr 10, 2020), Connecticut (Apr 15, 2020), Massachusetts (Apr 20, 2020), and North Dakota (Nov 08, 2020). Interestingly, the top four are tightly clustered in the Northeast during the initial spring 2020 wave.
